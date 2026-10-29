@@ -13,6 +13,9 @@ from .providers import MockLLM, MockChain
 
 app = FastAPI(title='Wallet Operations - Assessment')
 
+# Simple in-memory cache for AI responses: {(user_id, question, latest_tx_id): (answer, verified_data)}
+AI_CACHE: dict[tuple[int, str, int | None], dict] = {}
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -125,10 +128,50 @@ def transaction_detail(transaction_id: int, user_id: int = Depends(current_user)
 
 @app.post('/ai/ask')
 def ask(req: AskRequest, user_id: int = Depends(current_user), db: Session = Depends(get_db)):
-    target = req.user_id or user_id
-    records = db.scalars(select(Transaction).where(Transaction.user_id == target)).all()
-    context = str([{'amount': str(t.amount), 'reference': t.reference, 'status': t.status} for t in records])
-    return {'answer': MockLLM().answer(req.question, context)}
+    # 1. Strict ownership: ignore req.user_id completely, only use authenticated user_id
+    # 2. Get user's wallet and transactions (minimal non-sensitive context)
+    w = db.scalar(select(Wallet).where(Wallet.user_id == user_id))
+    wallet_balance = str(w.balance) if w else "0.00"
+
+    records = db.scalars(
+        select(Transaction)
+        .where(Transaction.user_id == user_id)
+        .order_by(Transaction.id.desc())
+        .limit(20)
+    ).all()
+
+    latest_tx_id = records[0].id if records else None
+
+    # 3. Check Cache
+    cache_key = (user_id, req.question.strip().lower(), latest_tx_id)
+    if cache_key in AI_CACHE:
+        return AI_CACHE[cache_key]
+
+    # 4. Strip sensitive references from prompt context
+    context = str([
+        {'amount': str(t.amount), 'kind': t.kind, 'status': t.status}
+        for t in records
+    ])
+
+    # 5. Call LLM safely with graceful fallback
+    try:
+        answer_text = MockLLM().answer(req.question, context)
+    except Exception:
+        raise HTTPException(503, 'AI assistant temporarily unavailable')
+
+    # 6. Separate verified truth from AI generated answer
+    response_payload = {
+        'verified_data': {
+            'user_id': user_id,
+            'wallet_balance': wallet_balance,
+            'transaction_count': len(records)
+        },
+        'answer': answer_text
+    }
+
+    AI_CACHE[cache_key] = response_payload
+    return response_payload
+
 
 @app.post('/deposits/verify')
 def verify_deposit(req: DepositRequest, user_id: int = Depends(current_user), db: Session = Depends(get_db)):
