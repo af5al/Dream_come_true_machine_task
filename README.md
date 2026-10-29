@@ -57,7 +57,19 @@ Keep the documented startup and build commands working. Support bounded, stable 
 
 ## Notes
 
-- `X-User-Id` is a *deliberately untrusted demo header*, not real authentication. Identify the risk; implement a sensible local authentication boundary or clearly document how to enforce it in production.
-- Local database credentials are test-only.
-- Avoid real money, real keys, real blockchain connections, or paid LLM calls.
-- Candidate implementations are assessed for correctness, reasoning, and tests, not feature count.
+---
+
+## Implementation & Assessment Notes
+
+### Running the Services
+```bash
+# Start all containers in background
+docker compose up -d
+
+# Check service health
+docker compose ps
+
+
+Backend API: http://127.0.0.1:8000/docs
+Frontend UI: http://127.0.0.1:5173
+PostgreSQL: 127.0.0.1:5434 (User: assessment, Password: assessment, DB: assessment)
