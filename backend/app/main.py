@@ -57,11 +57,36 @@ def wallet(user_id: int = Depends(current_user), db: Session = Depends(get_db)):
 
 @app.post('/withdraw')
 def withdraw(req: MoneyRequest, user_id: int = Depends(current_user), db: Session = Depends(get_db)):
-    w = db.scalar(select(Wallet).where(Wallet.user_id == user_id))
-    if not w or w.balance < req.amount:
-        raise HTTPException(400, 'Insufficient funds')
+
+     # 1. Lock the wallet row first (serializes all balance-changing ops for this wallet)
+    w = db.scalar(
+        select(Wallet)
+        .where(Wallet.user_id == user_id)
+        .with_for_update()
+    )
+
+    if not w:
+        raise HTTPException(404, 'Wallet not found');
+
+    # idempotency check
+    if req.reference:
+      existing_tx = db.scalar(select(Transaction).where(
+        Transaction.user_id == user_id,
+        Transaction.reference == req.reference
+      ))
+      if existing_tx:
+        if existing_tx.amount == req.amount:
+           return {'status': 'completed', 'balance': w.balance}
+        raise HTTPException(409, 'Reference already used with different amount')
+
+
+    # sufficient fund checks
+    if w.balance < req.amount:
+        raise HTTPException(400, 'Insufficient Fund')
+
+    # status mutation
     w.balance = w.balance - req.amount
-    db.add(Transaction(user_id=user_id, amount=req.amount, kind='withdrawal', status='completed', reference=req.reference))
+    db.add(Transaction(user_id=user_id, amount=req.amount, kind='withdraw', status='completed', reference=req.reference))
     db.commit()
     return {'status': 'completed', 'balance': w.balance}
 

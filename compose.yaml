@@ -13,6 +13,8 @@ services:
       retries: 15
   backend:
     build: ./backend
+    volumes:
+      - ./backend:/app
     environment:
       DATABASE_URL: postgresql+psycopg://assessment:assessment@db:5432/assessment
     ports:
