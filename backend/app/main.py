@@ -97,9 +97,12 @@ def transactions(user_id: int = Depends(current_user), db: Session = Depends(get
 
 @app.get('/transactions/{transaction_id}')
 def transaction_detail(transaction_id: int, user_id: int = Depends(current_user), db: Session = Depends(get_db)):
-    t = db.get(Transaction, transaction_id)
+    
+    t = db.scalar(select(Transaction).where(
+        Transaction.id == transaction_id, Transaction.user_id == user_id
+    ))
     if not t:
-        raise HTTPException(404, 'Not found')
+        raise HTTPException(404, 'Transaction Not found')
     return {'id': t.id, 'user_id': t.user_id, 'amount': t.amount, 'kind': t.kind, 'status': t.status, 'reference': t.reference, 'failure_reason': t.failure_reason}
 
 @app.post('/ai/ask')
