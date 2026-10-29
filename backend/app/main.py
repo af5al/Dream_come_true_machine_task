@@ -1,4 +1,6 @@
 """Wallet operations assessment application."""
+from multiprocessing import context
+from multiprocessing import context
 from decimal import Decimal
 from fastapi import FastAPI, Depends, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,7 +30,7 @@ def current_user(x_user_id: int = Header(default=1)) -> int:
 
 class MoneyRequest(BaseModel):
     amount: Decimal = Field(gt=0, decimal_places=2)
-    reference: str
+    reference: str | None = None
 
 class DepositRequest(MoneyRequest):
     tx_hash: str
@@ -114,13 +116,57 @@ def ask(req: AskRequest, user_id: int = Depends(current_user), db: Session = Dep
 
 @app.post('/deposits/verify')
 def verify_deposit(req: DepositRequest, user_id: int = Depends(current_user), db: Session = Depends(get_db)):
-    tx = MockChain().lookup(req.tx_hash)
+    # 1. External RPC lookup with outage handling
+    try:
+        tx = MockChain().lookup(req.tx_hash)
+    except Exception:
+        raise HTTPException(503, 'Blockchain provider unavailable')
+
     if not tx:
         raise HTTPException(404, 'Transaction not found')
-    w = db.scalar(select(Wallet).where(Wallet.user_id == user_id))
+
+    # 2. Strict policy validation
+    if tx.get('network') != req.network or tx.get('network') != 'ethereum':
+        raise HTTPException(400, 'Invalid or mismatched network')
+    if tx.get('token') != 'USDT':
+        raise HTTPException(400, 'Only USDT token supported')
+    if tx.get('to') != '0xmerchant':
+        raise HTTPException(400, 'Invalid merchant recipient address')
+    if tx.get('status') != 'success':
+        raise HTTPException(400, 'Transaction status is not successful')
+    if tx.get('confirmations', 0) < 12:
+        raise HTTPException(400, 'Insufficient confirmations (minimum 12 required)')
+    if Decimal(str(tx.get('amount'))) != Decimal(str(req.amount)):
+        raise HTTPException(400, 'Amount mismatch with on-chain record')
+
+    # 3. Deduplication / Replay protection across the entire system
+    existing = db.scalar(
+        select(Transaction).where(
+            Transaction.reference == req.tx_hash,
+            Transaction.kind == 'deposit'
+        )
+    )
+    if existing:
+        raise HTTPException(409, 'Transaction hash already credited')
+
+    # 4. Lock wallet and credit atomically
+    w = db.scalar(
+        select(Wallet)
+        .where(Wallet.user_id == user_id)
+        .with_for_update()
+    )
     if not w:
         raise HTTPException(404, 'Wallet not found')
-    w.balance = w.balance + req.amount
-    db.add(Transaction(user_id=user_id, amount=req.amount, kind='deposit', status='completed', reference=req.tx_hash))
+
+    w.balance = w.balance + Decimal(str(req.amount))
+    db.add(Transaction(
+        user_id=user_id,
+        amount=Decimal(str(req.amount)),
+        kind='deposit',
+        status='completed',
+        reference=req.tx_hash
+    ))
     db.commit()
     return {'status': 'credited', 'balance': w.balance}
+
+        
