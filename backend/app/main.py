@@ -93,9 +93,25 @@ def withdraw(req: MoneyRequest, user_id: int = Depends(current_user), db: Sessio
     return {'status': 'completed', 'balance': w.balance}
 
 @app.get('/transactions')
-def transactions(user_id: int = Depends(current_user), db: Session = Depends(get_db)):
-    records = db.scalars(select(Transaction).where(Transaction.user_id == user_id).order_by(Transaction.created_at.desc())).all()
-    return [{'id': t.id, 'amount': t.amount, 'kind': t.kind, 'status': t.status, 'reference': t.reference, 'failure_reason': t.failure_reason} for t in records]
+def list_transactions(
+        limit: int = 20,
+        cursor: int | None = None,
+        user_id: int = Depends(current_user),
+        db: Session = Depends(get_db)
+    ):
+    limit = max(1,  min(limit, 50))
+    query = select(Transaction).where(Transaction.user_id == user_id)
+    
+    if cursor is not None:
+        query = query.where(Transaction.id < cursor)
+        
+    query =  query.order_by(Transaction.id.desc()).limit(limit + 1)
+    results = db.scalars(query).all()
+    
+    has_more = len(results) > limit
+    items = results[:limit]
+    next_cursor = items[-1].id if has_more and items else None
+    return {'items': items, 'next_cursor': next_cursor, 'has_more': has_more}
 
 @app.get('/transactions/{transaction_id}')
 def transaction_detail(transaction_id: int, user_id: int = Depends(current_user), db: Session = Depends(get_db)):

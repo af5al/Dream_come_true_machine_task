@@ -1,5 +1,5 @@
 from decimal import Decimal
-from sqlalchemy import Integer, String, ForeignKey, DateTime, Numeric, func, CheckConstraint, UniqueConstraint
+from sqlalchemy import Integer, String, ForeignKey, DateTime, Numeric, func, CheckConstraint, UniqueConstraint, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from .db import Base
 
@@ -16,8 +16,8 @@ class Wallet(Base):
 class Transaction(Base):
     __tablename__ = 'transactions'
     __table_args__ = (
-        UniqueConstraint('user_id', 'reference',
-        name = 'uq_transactions_user_reference'),
+        UniqueConstraint('user_id', 'reference', name = 'uq_transactions_user_reference'),
+        Index('ix_transactions_user_id_id', 'user_id', 'id')
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer, index=True)
