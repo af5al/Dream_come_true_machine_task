@@ -24,6 +24,9 @@ services:
         condition: service_healthy
   frontend:
     build: ./frontend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
     environment:
       VITE_API_URL: http://localhost:8000
     ports:
